@@ -4,58 +4,36 @@ import plotly.express as px
 import requests
 import json
 import time
-from fpdf import FPDF
-import io
-import plotly.io as pio
 
 # === CONFIG ===
-API_KEY = "your_abuseipdb_api_key_here"  # Replace with your valid API key
+API_KEY = "7fd4c5eba9c28f0b846f1f8e3ae013380bf4af60ec50f865d0163d2431b9bd8474caef849e8393a4"  # <-- 🔒 Replace this with your AbuseIPDB API key
 ABUSEIPDB_URL = "https://api.abuseipdb.com/api/v2/check"
-TOP_N = 30
+TOP_N = 30  # Number of top IPs to check
 
+# === PAGE SETTINGS ===
 st.set_page_config(page_title="Cybersecurity Dashboard", layout="wide")
 st.title("🔐 Threat Intelligence Dashboard + API Enrichment")
 
+# === FILE UPLOAD ===
 uploaded_file = st.file_uploader("📤 Upload your CSV file", type="csv")
-
-# Function to convert a Plotly figure to an image (using Orca or Kaleido)
-def plot_to_image(fig):
-    buf = io.BytesIO()
-    try:
-        # If Kaleido works
-        fig.write_image(buf, format='png')
-    except RuntimeError:
-        # If Kaleido fails, fall back to Orca
-        pio.kaleido.scope.default_width = 700
-        pio.kaleido.scope.default_height = 500
-        fig.write_image(buf, format='png', engine='orca')  # Using Orca if Kaleido fails
-    buf.seek(0)
-    return buf
 
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
-    
-    # Convert Label to 0 (benign) and 1 (malicious)
-    df['Label'] = df['Label'].apply(lambda x: 1 if x != 'BENIGN' else 0)
-
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
 
+    # === SEARCH BAR ===
     ip_query = st.text_input("🔎 Search IP/domain/subnet", "")
+    filtered_df = df[df['Source IP'].astype(str).str.contains(ip_query, na=False)] if ip_query else df
 
-    if ip_query:
-        filtered_df = df[df['Source IP'].astype(str).str.contains(ip_query, na=False)]
-    else:
-        filtered_df = df
-
-    # --- Traffic by Protocol ---
+    # === TRAFFIC BY PROTOCOL ===
     st.subheader("📊 Traffic by Protocol (Total vs Malicious)")
     grouped = filtered_df.groupby(['Protocol', 'Label']).size().reset_index(name='Count')
     fig1 = px.bar(grouped, x='Protocol', y='Count', color='Label', barmode='group')
     st.plotly_chart(fig1, use_container_width=True)
 
-    # --- Top Malicious IPs ---
+    # === TOP MALICIOUS IPS ===
     st.subheader("🚨 Top Malicious IPs")
-    malicious_df = df[df['Label'] == 1]  # Now 1 represents malicious
+    malicious_df = df[df['Label'] != 'BENIGN']
     if ip_query:
         malicious_df = malicious_df[malicious_df['Source IP'].astype(str).str.contains(ip_query, na=False)]
     top_ips = malicious_df['Source IP'].value_counts().nlargest(10).reset_index()
@@ -63,16 +41,16 @@ if uploaded_file is not None:
     fig2 = px.bar(top_ips, x='Source IP', y='Count')
     st.plotly_chart(fig2, use_container_width=True)
 
-    # --- Detection Rate Pie ---
+    # === DETECTION RATE PIE CHART ===
     st.subheader("📈 Detection Rate (Benign vs Malicious)")
     rate = filtered_df['Label'].value_counts(normalize=True).reset_index()
     rate.columns = ['Label', 'Percentage']
-    fig3 = px.pie(rate, values='Percentage', names='Label', labels={0: 'Benign', 1: 'Malicious'})
+    fig3 = px.pie(rate, values='Percentage', names='Label')
     st.plotly_chart(fig3, use_container_width=True)
 
-    # --- Intrusion Events ---
+    # === INTRUSION TIME SERIES ===
     st.subheader("📆 Intrusion Events Over Time")
-    intrusions = df[df['Label'] == 1]  # Now 1 represents malicious
+    intrusions = df[df['Label'] != 'BENIGN']
     if ip_query:
         intrusions = intrusions[intrusions['Source IP'].astype(str).str.contains(ip_query, na=False)]
     time_df = intrusions.dropna(subset=['Timestamp']).groupby(
@@ -81,20 +59,22 @@ if uploaded_file is not None:
     fig4 = px.line(time_df, x='Timestamp', y='Count')
     st.plotly_chart(fig4, use_container_width=True)
 
-    # --- Search Results Table ---
+    # === SEARCH RESULTS TABLE ===
     if ip_query:
         st.subheader(f"🔍 Search Results for '{ip_query}'")
         result_df = filtered_df[['Timestamp', 'Source IP', 'Protocol', 'Label']]
         st.dataframe(result_df.head(10))
 
-    # --- API Enrichment ---
-    st.subheader("🌐 Enrich Top IPs with AbuseIPDB")
+    # === ABUSEIPDB API ENRICHMENT ===
+    st.subheader("🌐 Enrich Top Malicious IPs with AbuseIPDB")
 
-    if 'Destination IP' not in df.columns:
-        st.error("❌ 'Destination IP' column is missing from the dataset.")
+    if 'Source IP' not in df.columns:
+        st.error("❌ 'Source IP' column is missing from the dataset.")
     else:
-        if st.button("🔍 Run IP Reputation Check (Top 30)"):
-            ip_list = df['Destination IP'].value_counts().head(TOP_N).index.tolist()
+        if st.button("🔍 Run IP Reputation Check on Top Malicious IPs"):
+            # Filter top malicious IPs
+            malicious_df = df[df['Label'] != 'BENIGN']
+            ip_list = malicious_df['Source IP'].value_counts().head(TOP_N).index.tolist()
             results = {}
 
             with st.spinner("⏳ Querying AbuseIPDB..."):
@@ -109,99 +89,63 @@ if uploaded_file is not None:
                             results[ip] = response.json()
                         else:
                             results[ip] = {"error": f"Status {response.status_code}", "reason": response.text}
-                        time.sleep(1)
+                        time.sleep(1)  # Respect rate limits
                     except Exception as e:
                         results[ip] = {"error": str(e)}
 
+                # Display results in expandable boxes
                 for ip, data in results.items():
                     with st.expander(f"IP: {ip}"):
                         st.json(data)
 
-                # Save JSON for download
+                # Save results as downloadable JSON
                 json_str = json.dumps(results, indent=4)
                 st.download_button(
-                    label="📥 Download Results as JSON",
+                    label="📥 Download Enrichment Results (JSON)",
                     data=json_str,
-                    file_name="api_enriched_threats.json",
+                    file_name="malicious_ip_enrichment.json",
                     mime="application/json"
                 )
+                
+    # --- PDF Report ---
+    st.subheader("📝 Generate PDF Report")
 
-    # === PDF REPORT GENERATION ===
-    st.subheader("📝 Generate Summary Report (PDF)")
+    if st.button("📄 Generate PDF Summary"):
+        class PDF(FPDF):
+            def header(self):
+                self.set_font("Arial", 'B', 14)
+                self.cell(0, 10, "Cybersecurity Threat Report", ln=True, align="C")
+                self.ln(10)
 
-    if st.button("📄 Generate PDF Report"):
-        pdf = FPDF()
+            def footer(self):
+                self.set_y(-15)
+                self.set_font("Arial", 'I', 8)
+                self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+
+        pdf = PDF()
         pdf.add_page()
-        pdf.set_font("Arial", 'B', 16)
-        pdf.cell(0, 10, "Cybersecurity Threat Intelligence Report", ln=True, align='C')
-        pdf.ln(10)
+        pdf.set_font("Arial", size=12)
 
-        # Basic stats (overview)
-        total = len(df)
-        benign = len(df[df['Label'] == 0])  # 0 for benign
-        malicious = len(df[df['Label'] == 1])  # 1 for malicious
+        pdf.cell(0, 10, f"Total Records: {len(df)}", ln=True)
+        total_malicious = len(df[df['Label'] != 'BENIGN'])
+        pdf.cell(0, 10, f"Total Malicious Entries: {total_malicious}", ln=True)
 
-        pdf.set_font("Arial", '', 12)
         pdf.ln(5)
-        pdf.cell(0, 10, f"Total Records: {total}", ln=True)
-        pdf.cell(0, 10, f"Benign Records: {benign}", ln=True)
-        pdf.cell(0, 10, f"Malicious Records: {malicious}", ln=True)
-
-        # --- Traffic by Protocol ---
-        pdf.ln(10)
         pdf.set_font("Arial", 'B', 12)
-        pdf.cell(0, 10, "Traffic by Protocol (Total vs Malicious)", ln=True)
-        pdf.set_font("Arial", '', 12)
-        pdf.multi_cell(0, 10, "This chart shows the distribution of traffic across different protocols and highlights malicious traffic.")
-        
-        # Save the chart as an image and insert it into the PDF
-        buf1 = plot_to_image(fig1)
-        pdf.image(buf1, x=10, w=180)
-        
-        # --- Top Malicious IPs ---
-        pdf.ln(10)
-        pdf.set_font("Arial", 'B', 12)
-        pdf.cell(0, 10, "Top Malicious IPs", ln=True)
-        pdf.set_font("Arial", '', 12)
-        pdf.multi_cell(0, 10, "This chart shows the top malicious IP addresses based on the dataset.")
-        
-        # Save the chart as an image and insert it into the PDF
-        buf2 = plot_to_image(fig2)
-        pdf.image(buf2, x=10, w=180)
+        pdf.cell(0, 10, "Top 5 Malicious IPs:", ln=True)
+        pdf.set_font("Arial", size=11)
+        for idx, row in top_ips.head(5).iterrows():
+            pdf.cell(0, 10, f"{row['Source IP']}: {row['Count']} detections", ln=True)
 
-        # --- Detection Rate ---
-        pdf.ln(10)
+        pdf.ln(5)
         pdf.set_font("Arial", 'B', 12)
-        pdf.cell(0, 10, "Detection Rate (Benign vs Malicious)", ln=True)
-        pdf.set_font("Arial", '', 12)
-        pdf.multi_cell(0, 10, "This pie chart illustrates the detection rate between benign and malicious records.")
-        
-        # Save the chart as an image and insert it into the PDF
-        buf3 = plot_to_image(fig3)
-        pdf.image(buf3, x=10, w=180)
+        pdf.cell(0, 10, "Detection Breakdown:", ln=True)
+        pdf.set_font("Arial", size=11)
+        for i, r in rate.iterrows():
+            pdf.cell(0, 10, f"{r['Label']}: {round(r['Percentage']*100, 2)}%", ln=True)
 
-        # --- Intrusion Events ---
-        pdf.ln(10)
-        pdf.set_font("Arial", 'B', 12)
-        pdf.cell(0, 10, "Intrusion Events Over Time", ln=True)
-        pdf.set_font("Arial", '', 12)
-        pdf.multi_cell(0, 10, "This line chart shows intrusion events over time, helping to track incidents.")
-        
-        # Save the chart as an image and insert it into the PDF
-        buf4 = plot_to_image(fig4)
-        pdf.image(buf4, x=10, w=180)
-
-        # Save PDF to a buffer for download
         pdf_output = pdf.output(dest='S').encode('latin1')
-        pdf_buffer = io.BytesIO(pdf_output)
-
-        # Provide the download button for the generated PDF
-        st.download_button(
-            label="📥 Download Full Report as PDF",
-            data=pdf_buffer,
-            file_name="cybersecurity_report.pdf",
-            mime="application/pdf"
-        )
+        st.download_button("📄 Download PDF Report", data=pdf_output, file_name="threat_report.pdf", mime="application/pdf")
 
 else:
-    st.info("👆 Please upload a CSV file to get started.")
+    st.info("👆 Please upload a CSV file to begin.")
