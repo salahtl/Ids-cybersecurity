@@ -5,10 +5,11 @@ import requests
 import json
 import time
 from fpdf import FPDF
-from io import BytesIO
+import matplotlib.pyplot as plt
+import io
 
 # === CONFIG ===
-API_KEY = "7fd4c5eba9c28f0b846f1f8e3ae013380bf4af60ec50f865d0163d2431b9bd8474caef849e8393a4"  # Replace with your valid API key
+API_KEY = "your_abuseipdb_api_key_here"  # Replace with your valid API key
 ABUSEIPDB_URL = "https://api.abuseipdb.com/api/v2/check"
 TOP_N = 30
 
@@ -16,6 +17,13 @@ st.set_page_config(page_title="Cybersecurity Dashboard", layout="wide")
 st.title("🔐 Threat Intelligence Dashboard + API Enrichment")
 
 uploaded_file = st.file_uploader("📤 Upload your CSV file", type="csv")
+
+# Function to convert plot to image
+def plot_to_image(fig):
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png')
+    buf.seek(0)
+    return buf
 
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
@@ -51,7 +59,7 @@ if uploaded_file is not None:
     fig3 = px.pie(rate, values='Percentage', names='Label')
     st.plotly_chart(fig3, use_container_width=True)
 
-    # --- Intrusion Timeline ---
+    # --- Intrusion Events ---
     st.subheader("📆 Intrusion Events Over Time")
     intrusions = df[df['Label'] != 'BENIGN']
     if ip_query:
@@ -107,41 +115,78 @@ if uploaded_file is not None:
                     mime="application/json"
                 )
 
-    # --- Generate PDF Report ---
+    # === PDF REPORT GENERATION ===
     st.subheader("📝 Generate Summary Report (PDF)")
 
     if st.button("📄 Generate PDF Report"):
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", 'B', 16)
-        pdf.cell(0, 10, "Cybersecurity Report", ln=True)
+        pdf.cell(0, 10, "Cybersecurity Threat Intelligence Report", ln=True, align='C')
+        pdf.ln(10)
 
-        # Basic stats
+        # Basic stats (overview)
         total = len(df)
         malicious = len(df[df['Label'] != 'BENIGN'])
         benign = len(df[df['Label'] == 'BENIGN'])
 
         pdf.set_font("Arial", '', 12)
-        pdf.ln(10)
+        pdf.ln(5)
         pdf.cell(0, 10, f"Total Records: {total}", ln=True)
         pdf.cell(0, 10, f"Benign Records: {benign}", ln=True)
         pdf.cell(0, 10, f"Malicious Records: {malicious}", ln=True)
 
-        # Top 5 protocols
-        pdf.ln(5)
+        # --- Traffic by Protocol ---
+        pdf.ln(10)
         pdf.set_font("Arial", 'B', 12)
-        pdf.cell(0, 10, "Top 5 Protocols:", ln=True)
-        top_protocols = df['Protocol'].value_counts().head(5)
+        pdf.cell(0, 10, "Traffic by Protocol (Total vs Malicious)", ln=True)
         pdf.set_font("Arial", '', 12)
-        for proto, count in top_protocols.items():
-            pdf.cell(0, 10, f"{proto}: {count} occurrences", ln=True)
+        pdf.multi_cell(0, 10, "This chart shows the distribution of traffic across different protocols and highlights malicious traffic.")
+        
+        # Save the chart as an image and insert it into the PDF
+        buf1 = plot_to_image(fig1)
+        pdf.image(buf1, x=10, w=180)
+        
+        # --- Top Malicious IPs ---
+        pdf.ln(10)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, "Top Malicious IPs", ln=True)
+        pdf.set_font("Arial", '', 12)
+        pdf.multi_cell(0, 10, "This chart shows the top malicious IP addresses based on the dataset.")
+        
+        # Save the chart as an image and insert it into the PDF
+        buf2 = plot_to_image(fig2)
+        pdf.image(buf2, x=10, w=180)
 
-        # Output as BytesIO for Streamlit download
+        # --- Detection Rate ---
+        pdf.ln(10)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, "Detection Rate (Benign vs Malicious)", ln=True)
+        pdf.set_font("Arial", '', 12)
+        pdf.multi_cell(0, 10, "This pie chart illustrates the detection rate between benign and malicious records.")
+        
+        # Save the chart as an image and insert it into the PDF
+        buf3 = plot_to_image(fig3)
+        pdf.image(buf3, x=10, w=180)
+
+        # --- Intrusion Events ---
+        pdf.ln(10)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, "Intrusion Events Over Time", ln=True)
+        pdf.set_font("Arial", '', 12)
+        pdf.multi_cell(0, 10, "This line chart shows intrusion events over time, helping to track incidents.")
+        
+        # Save the chart as an image and insert it into the PDF
+        buf4 = plot_to_image(fig4)
+        pdf.image(buf4, x=10, w=180)
+
+        # Save PDF to a buffer for download
         pdf_output = pdf.output(dest='S').encode('latin1')
         pdf_buffer = BytesIO(pdf_output)
 
+        # Provide the download button for the generated PDF
         st.download_button(
-            label="📥 Download PDF Report",
+            label="📥 Download Full Report as PDF",
             data=pdf_buffer,
             file_name="cybersecurity_report.pdf",
             mime="application/pdf"
