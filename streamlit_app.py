@@ -18,11 +18,17 @@ st.title("🔐 Threat Intelligence Dashboard + API Enrichment")
 
 uploaded_file = st.file_uploader("📤 Upload your CSV file", type="csv")
 
-# Function to convert a Plotly figure to an image
+# Function to convert a Plotly figure to an image (using Orca or Kaleido)
 def plot_to_image(fig):
     buf = io.BytesIO()
-    # Use Kaleido to save the Plotly figure as an image (PNG)
-    fig.write_image(buf, format='png')
+    try:
+        # If Kaleido works
+        fig.write_image(buf, format='png')
+    except RuntimeError:
+        # If Kaleido fails, fall back to Orca
+        pio.kaleido.scope.default_width = 700
+        pio.kaleido.scope.default_height = 500
+        fig.write_image(buf, format='png', engine='orca')  # Using Orca if Kaleido fails
     buf.seek(0)
     return buf
 
@@ -187,7 +193,7 @@ if uploaded_file is not None:
 
         # Save PDF to a buffer for download
         pdf_output = pdf.output(dest='S').encode('latin1')
-        pdf_buffer = BytesIO(pdf_output)
+        pdf_buffer = io.BytesIO(pdf_output)
 
         # Provide the download button for the generated PDF
         st.download_button(
