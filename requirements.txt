@@ -1,5 +1,6 @@
 streamlit
 pandas
-plotly>=4.9.0
+plotly>=5.0.0
 kaleido
 fpdf
+requests
