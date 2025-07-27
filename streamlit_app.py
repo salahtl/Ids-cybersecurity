@@ -6,6 +6,7 @@ import json
 import time
 from fpdf import FPDF
 import io
+import plotly.io as pio
 
 # === CONFIG ===
 API_KEY = "your_abuseipdb_api_key_here"  # Replace with your valid API key
@@ -17,10 +18,11 @@ st.title("🔐 Threat Intelligence Dashboard + API Enrichment")
 
 uploaded_file = st.file_uploader("📤 Upload your CSV file", type="csv")
 
-# Function to convert plot to image
+# Function to convert a Plotly figure to an image
 def plot_to_image(fig):
     buf = io.BytesIO()
-    fig.savefig(buf, format='png')
+    # Use Kaleido to save the Plotly figure as an image (PNG)
+    fig.write_image(buf, format='png')
     buf.seek(0)
     return buf
 
