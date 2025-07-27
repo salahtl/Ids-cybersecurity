@@ -5,7 +5,6 @@ import requests
 import json
 import time
 from fpdf import FPDF
-import matplotlib.pyplot as plt
 import io
 
 # === CONFIG ===
@@ -27,6 +26,10 @@ def plot_to_image(fig):
 
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
+    
+    # Convert Label to 0 (benign) and 1 (malicious)
+    df['Label'] = df['Label'].apply(lambda x: 1 if x != 'BENIGN' else 0)
+
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
 
     ip_query = st.text_input("🔎 Search IP/domain/subnet", "")
@@ -44,7 +47,7 @@ if uploaded_file is not None:
 
     # --- Top Malicious IPs ---
     st.subheader("🚨 Top Malicious IPs")
-    malicious_df = df[df['Label'] != 'BENIGN']
+    malicious_df = df[df['Label'] == 1]  # Now 1 represents malicious
     if ip_query:
         malicious_df = malicious_df[malicious_df['Source IP'].astype(str).str.contains(ip_query, na=False)]
     top_ips = malicious_df['Source IP'].value_counts().nlargest(10).reset_index()
@@ -56,12 +59,12 @@ if uploaded_file is not None:
     st.subheader("📈 Detection Rate (Benign vs Malicious)")
     rate = filtered_df['Label'].value_counts(normalize=True).reset_index()
     rate.columns = ['Label', 'Percentage']
-    fig3 = px.pie(rate, values='Percentage', names='Label')
+    fig3 = px.pie(rate, values='Percentage', names='Label', labels={0: 'Benign', 1: 'Malicious'})
     st.plotly_chart(fig3, use_container_width=True)
 
     # --- Intrusion Events ---
     st.subheader("📆 Intrusion Events Over Time")
-    intrusions = df[df['Label'] != 'BENIGN']
+    intrusions = df[df['Label'] == 1]  # Now 1 represents malicious
     if ip_query:
         intrusions = intrusions[intrusions['Source IP'].astype(str).str.contains(ip_query, na=False)]
     time_df = intrusions.dropna(subset=['Timestamp']).groupby(
@@ -127,8 +130,8 @@ if uploaded_file is not None:
 
         # Basic stats (overview)
         total = len(df)
-        malicious = len(df[df['Label'] != 'BENIGN'])
-        benign = len(df[df['Label'] == 'BENIGN'])
+        benign = len(df[df['Label'] == 0])  # 0 for benign
+        malicious = len(df[df['Label'] == 1])  # 1 for malicious
 
         pdf.set_font("Arial", '', 12)
         pdf.ln(5)
